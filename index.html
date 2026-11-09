@@ -159,6 +159,17 @@ svg.graph{width:100%;height:auto;display:block;touch-action:none;user-select:non
 .legend span{color:var(--muted)}
 .legend .l-you::before{background:var(--you)}.legend .l-ghost::before{background:var(--ghost)}.legend .l-speed::before{background:var(--gold)}
 
+.lab-intro{margin-bottom:18px}
+.lab-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+@media (max-width:1100px){.lab-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.lab-grid>.panel:last-child{grid-column:1/-1}}
+@media (max-width:640px){.lab-grid{grid-template-columns:minmax(0,1fr)}}
+.cap{font-size:12px;color:var(--muted);margin:8px 0 0}
+.now{display:flex;gap:16px;margin-top:10px;font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.now b{color:var(--fg);font-weight:500;font-variant-numeric:tabular-nums}
+.sp-area{fill:var(--gold);opacity:.14}
+.sp-line{fill:none;stroke:var(--gold);stroke-width:3;stroke-linecap:round}
+.sp-zero{stroke:#45496a;stroke-dasharray:4 4}
+.sp-lin{stroke:var(--muted);stroke-dasharray:2 4;stroke-width:1.5}
 .meter{margin-top:18px}
 .meter-head{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:12px;color:var(--muted);margin-bottom:6px}
 .meter-head b{color:var(--fg);font-weight:500;font-variant-numeric:tabular-nums}
@@ -190,6 +201,7 @@ svg.graph{width:100%;height:auto;display:block;touch-action:none;user-select:non
       <button class="tab" role="tab" id="tab-train" aria-selected="false">Train</button>
       <button class="tab" role="tab" id="tab-challenge" aria-selected="false">Challenge</button>
       <button class="tab" role="tab" id="tab-play" aria-selected="false">Playground</button>
+      <button class="tab" role="tab" id="tab-lab" aria-selected="false">Graph Lab</button>
     </div>
     </div>
   </header>
@@ -248,6 +260,34 @@ svg.graph{width:100%;height:auto;display:block;touch-action:none;user-select:non
               <div class="score" id="c-score">0</div>
               <div><div class="stars" id="c-stars"></div><p id="c-msg"></p></div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- GRAPH LAB -->
+      <section id="view-lab" hidden>
+        <div class="panel lab-intro">
+          <p class="eyebrow">Graph Lab</p>
+          <h2>Value graph and speed graph</h2>
+          <p class="brief">Drag the dots on the value graph. The speed graph redraws itself, and all four boxes follow the same curve. The dashed outlines move linearly for comparison.</p>
+          <div class="presets" id="l-presets"></div>
+          <label class="toggle" style="margin-top:12px"><input type="checkbox" id="l-slow"> Slow motion</label>
+        </div>
+        <div class="lab-grid">
+          <div class="panel">
+            <p class="eyebrow">Value graph · where the object is</p>
+            <svg class="graph" id="l-graph" viewBox="0 0 320 320" role="img" aria-label="Value graph editor. Drag the two handles."></svg>
+            <p class="cap">Steep = moving fast. Flat = moving slowly. Above the end line = overshoot. Below the start line = moving backwards.</p>
+          </div>
+          <div class="panel">
+            <p class="eyebrow">Speed graph · how fast it moves</p>
+            <svg class="graph" id="l-speed" viewBox="0 0 320 220" role="img" aria-label="Speed graph, updates from the value graph."></svg>
+            <p class="cap">High = fast. On the zero line = stopped. Below zero = moving backwards. The peak is the fastest moment.</p>
+            <div class="now" aria-live="off"><span>Position <b id="l-pos">0%</b></span><span>Speed <b id="l-spd">0×</b></span></div>
+          </div>
+          <div class="panel">
+            <p class="eyebrow">Every movement</p>
+            <div class="stage" id="l-stage" style="margin-top:4px"></div>
           </div>
         </div>
       </section>
@@ -328,7 +368,8 @@ const PRESETS=[
   {name:"ease-in", h:[0.42,0,1,1], note:"Slow start, fast stop."},
   {name:"ease-out", h:[0,0,0.58,1], note:"Fast start, slow stop."},
   {name:"ease-in-out", h:[0.42,0,0.58,1], note:"Slow at both ends."},
-  {name:"overshoot", h:[0.34,1.56,0.64,1], note:"Goes too far, then comes back."}
+  {name:"overshoot", h:[0.34,1.56,0.64,1], note:"Goes too far, then comes back."},
+  {name:"anticipation", h:[0.36,0,0.66,-0.56], note:"Steps back before it goes."}
 ];
 
 /* ---------- storage (per viewer convenience) ---------- */
@@ -641,25 +682,83 @@ function updateMatch(end,silent){
 $("t-reset").addEventListener("click",()=>{const i=trainSt.level;trainSt.h[i]=LINEAR.slice();tEd.set(LINEAR);tLanes[0].ease=makeEase(LINEAR);updateMatch(false,true);});
 $("t-next").addEventListener("click",()=>{if(trainSt.level<TRAIN.length-1)loadTrain(trainSt.level+1);});
 
+/* ---------- graph lab ---------- */
+class SpeedGraph{
+  constructor(svg){
+    this.svg=svg;this.L=34;this.R=306;this.T=14;this.B=186;
+    const grid=el("g",{class:"grid"},svg);
+    for(let i=0;i<=4;i++)el("line",{x1:this.x(i/4),x2:this.x(i/4),y1:this.T,y2:this.B},grid);
+    ["0%","25%","50%","75%","100%"].forEach((t,i)=>{const tx=el("text",{x:this.x(i/4),y:this.B+16,"text-anchor":"middle"},svg);tx.textContent=t;});
+    const tl=el("text",{x:this.R,y:this.B+28,"text-anchor":"end"},svg);tl.textContent="time →";
+    this.area=el("path",{class:"sp-area"},svg);
+    this.lin=el("line",{class:"sp-lin"},svg);
+    this.linLabel=el("text",{"text-anchor":"end"},svg);this.linLabel.textContent="linear";
+    this.zero=el("line",{class:"sp-zero",x1:this.L,x2:this.R},svg);
+    this.zeroLabel=el("text",{x:this.L-4,"text-anchor":"end"},svg);this.zeroLabel.textContent="0";
+    this.line=el("path",{class:"sp-line"},svg);
+    this.pl=el("line",{class:"playline",y1:this.T,y2:this.B},svg);
+    this.dot=el("circle",{class:"head",r:5},svg);
+  }
+  x(t){return this.L+t*(this.R-this.L);}
+  y(s){return this.T+(this.max-s)/(this.max-this.min)*(this.B-this.T);}
+  speedAt(t){const e=0.004,a=Math.max(0,t-e),b=Math.min(1,t+e);return (this.f(b)-this.f(a))/(b-a);}
+  set(h){
+    this.f=makeEase(h);const N=100;this.s=[];
+    for(let i=0;i<=N;i++)this.s.push(this.speedAt(i/N));
+    this.max=Math.max(1.5,...this.s)*1.1;this.min=Math.min(0,...this.s)*1.1;
+    const pts=this.s.map((v,i)=>`${this.x(i/N).toFixed(1)},${this.y(v).toFixed(1)}`);
+    this.line.setAttribute("d","M"+pts.join("L"));
+    this.area.setAttribute("d",`M${this.x(0)},${this.y(0)}L${pts.join("L")}L${this.x(1)},${this.y(0)}Z`);
+    const z=this.y(0),l=this.y(1);
+    this.zero.setAttribute("y1",z);this.zero.setAttribute("y2",z);this.zeroLabel.setAttribute("y",z+3);
+    this.lin.setAttribute("x1",this.L);this.lin.setAttribute("x2",this.R);this.lin.setAttribute("y1",l);this.lin.setAttribute("y2",l);
+    this.linLabel.setAttribute("x",this.R-2);this.linLabel.setAttribute("y",l-4);
+  }
+  play(t){
+    const s=this.speedAt(t);
+    this.pl.setAttribute("x1",this.x(t));this.pl.setAttribute("x2",this.x(t));
+    this.dot.setAttribute("cx",this.x(t));this.dot.setAttribute("cy",this.y(s));
+    return s;
+  }
+}
+state.labH=store.get("labH",[0,0,0.58,1]);
+const lStage=$("l-stage");
+const lLanes=[lane(lStage,"you","Move","x",true),lane(lStage,"you","Grow","scale",true),lane(lStage,"you","Spin","rotate",true),lane(lStage,"you","Fade","opacity",true)];
+const lSpeed=new SpeedGraph($("l-speed"));
+const lEd=new Editor($("l-graph"),(h,end)=>{state.labH=h.slice();refreshLab();if(end)store.set("labH",state.labH);});
+function refreshLab(){
+  const f=makeEase(state.labH);lLanes.forEach(L=>L.ease=f);lSpeed.set(state.labH);
+  const match=PRESETS.find(p=>p.h.every((v,i)=>Math.abs(v-state.labH[i])<0.005));
+  document.querySelectorAll("#l-presets .chip").forEach(c=>c.setAttribute("aria-pressed",String(!!match&&c.dataset.name===match.name)));
+}
+$("l-presets").innerHTML=PRESETS.map(p=>`<button class="chip" data-name="${p.name}" aria-pressed="false">${p.name}</button>`).join("");
+$("l-presets").addEventListener("click",e=>{const c=e.target.closest(".chip");if(!c)return;const p=PRESETS.find(x=>x.name===c.dataset.name);state.labH=p.h.slice();lEd.set(p.h);refreshLab();store.set("labH",state.labH);cycleStart=performance.now();});
+let labSlow=false;$("l-slow").addEventListener("change",e=>{labSlow=e.target.checked;cycleStart=performance.now();});
+
 /* ---------- tabs ---------- */
 function setView(v){
   state.view=v;
-  ["train","challenge","play"].forEach(n=>{$("view-"+n).hidden=v!==n;$("tab-"+n).setAttribute("aria-selected",String(v===n));});
+  ["train","challenge","play","lab"].forEach(n=>{$("view-"+n).hidden=v!==n;$("tab-"+n).setAttribute("aria-selected",String(v===n));});
   cycleStart=performance.now();
 }
 $("tab-train").addEventListener("click",()=>setView("train"));
 $("tab-challenge").addEventListener("click",()=>setView("challenge"));
 $("tab-play").addEventListener("click",()=>setView("play"));
+$("tab-lab").addEventListener("click",()=>setView("lab"));
 
 /* ---------- animation loop ---------- */
 let cycleStart=performance.now();
 function frame(now){
-  const dur=state.view==="play"?state.dur:1300;
+  const dur=state.view==="play"?state.dur:state.view==="lab"?(labSlow?3500:1300):1300;
   const pre=350,hold=700,cyc=pre+dur+hold;
   const el=(now-cycleStart)%cyc;
   const t=Math.min(1,Math.max(0,(el-pre)/dur));
   if(state.view==="train"){tLanes.forEach(L=>applyProp(L,L.ease(t)));tEd.play(t);}
   else if(state.view==="challenge"){cLanes.forEach(L=>{applyProp(L,L.ease(t));if(L.lin&&L.linEase)applyProp(L,L.linEase(t),L.lin);});cEd.play(t);}
+  else if(state.view==="lab"){
+    const v=lLanes[0].ease(t);lLanes.forEach(L=>{applyProp(L,v);applyProp(L,t,L.lin);});lEd.play(t);
+    const s=lSpeed.play(t);$("l-pos").textContent=Math.round(v*100)+"%";$("l-spd").textContent=s.toFixed(1)+"×";
+  }
   else{pLanes.forEach(L=>{applyProp(L,L.ease(t));if(L.lin)applyProp(L,t,L.lin);});pEd.play(t);}
   requestAnimationFrame(frame);
 }
@@ -709,7 +808,7 @@ $("nick").addEventListener("input",e=>{state.nick=e.target.value.slice(0,20);sto
 
 /* ---------- start ---------- */
 function start(){
-  setSoundBtn();pEd.set(state.playH);refreshPlay();
+  setSoundBtn();pEd.set(state.playH);refreshPlay();lEd.set(state.labH);refreshLab();
   loadLevel(Math.min(state.level,LEVELS.length-1));
   loadTrain(trainSt.level);
   setView(state.view);updateTotal();
