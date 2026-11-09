@@ -158,6 +158,16 @@ svg.graph{width:100%;height:auto;display:block;touch-action:none;user-select:non
 .legend span{color:var(--muted)}
 .legend .l-you::before{background:var(--you)}.legend .l-ghost::before{background:var(--ghost)}.legend .l-speed::before{background:var(--gold)}
 
+.meter{margin-top:18px}
+.meter-head{display:flex;justify-content:space-between;font-family:var(--f-mono);font-size:12px;color:var(--muted);margin-bottom:6px}
+.meter-head b{color:var(--fg);font-weight:500;font-variant-numeric:tabular-nums}
+.meter-bar{height:10px;border-radius:999px;background:var(--bg);border:1px solid var(--line);overflow:hidden}
+.meter-bar i{display:block;height:100%;width:0;background:var(--you);border-radius:999px;transition:width .15s,background .2s}
+.meter-bar i.ok{background:var(--good)}
+.lesson{margin-top:14px;padding:12px 14px;border-radius:10px;background:var(--panel-2);border:1px solid var(--good);font-size:14px}
+.lesson b{color:var(--good)}
+.graph .ghost-h{fill:none;stroke:var(--ghost);stroke-width:2;stroke-dasharray:3 3;opacity:.9;pointer-events:none}
+.lv.done{border-color:var(--good);color:var(--good)}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:14px;z-index:20}
 
 .done-card{text-align:center;padding:26px 18px}
@@ -176,7 +186,8 @@ svg.graph{width:100%;height:auto;display:block;touch-action:none;user-select:non
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <button class="sound" id="sound" aria-pressed="true">Sound on</button>
     <div class="tabs" role="tablist" aria-label="Mode">
-      <button class="tab" role="tab" id="tab-challenge" aria-selected="true">Challenge</button>
+      <button class="tab" role="tab" id="tab-train" aria-selected="false">Train</button>
+      <button class="tab" role="tab" id="tab-challenge" aria-selected="false">Challenge</button>
       <button class="tab" role="tab" id="tab-play" aria-selected="false">Playground</button>
     </div>
     </div>
@@ -184,6 +195,32 @@ svg.graph{width:100%;height:auto;display:block;touch-action:none;user-select:non
 
   <div class="layout">
     <main>
+      <!-- TRAIN -->
+      <section id="view-train" hidden>
+        <nav class="levels" id="t-levels" aria-label="Training levels"></nav>
+        <div class="work">
+          <div class="panel">
+            <p class="eyebrow" id="t-eyebrow">Training 1 of 6</p>
+            <h2 id="t-title">Add an ease-out</h2>
+            <p class="brief" id="t-brief"></p>
+            <div class="stage" id="t-stage"></div>
+            <div class="meter" aria-live="polite">
+              <div class="meter-head"><span>Match</span><b id="t-pct">0%</b></div>
+              <div class="meter-bar"><i id="t-bar"></i></div>
+            </div>
+            <div class="lesson" id="t-lesson" hidden></div>
+          </div>
+          <div class="panel">
+            <p class="eyebrow">Drag the pink dots onto the dashed curve</p>
+            <svg class="graph" id="t-graph" viewBox="0 0 320 320" role="img" aria-label="Bezier curve editor. Drag the two handles to trace the dashed target curve."></svg>
+            <div class="actions">
+              <button class="btn" id="t-reset">Start over</button>
+              <button class="btn primary" id="t-next" hidden>Next →</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- CHALLENGE -->
       <section id="view-challenge">
         <nav class="levels" id="levels" aria-label="Levels"></nav>
@@ -303,7 +340,7 @@ const state={
   hinted: LEVELS.map(()=>false),
   playH: boot.playH ?? [0,0,0.58,1],
   dur: boot.dur ?? 1000,
-  view: boot.view ?? "challenge",
+  view: boot.view ?? "train",
   nick: store.get("nick","")
 };
 state.best=LEVELS.map((_,i)=>Number(state.best[i])||0);
@@ -329,6 +366,8 @@ class Editor{
     const tl=el("text",{x:G.r,y:G.b+27,"text-anchor":"end"},svg);tl.textContent="time →";
     this.speedPath=el("path",{class:"speed"},svg);
     this.targetPath=el("path",{class:"target"},svg);
+    this.ghosts=[el("circle",{class:"ghost-h",r:9},svg),el("circle",{class:"ghost-h",r:9},svg)];
+    this.ghosts.forEach(g=>g.style.display="none");
     this.stem1=el("line",{class:"stem"},svg);this.stem2=el("line",{class:"stem"},svg);
     this.curve=el("path",{class:"curve"},svg);
     this.playline=el("line",{class:"playline",y1:G.t,y2:G.b},svg);
@@ -352,6 +391,9 @@ class Editor{
   }
   set(h){this.h=h.slice();this.draw();}
   setTarget(h,on){this.target=h;if(h)this.targetPath.setAttribute("d",this.path(h));this.targetPath.classList.toggle("on",!!on);}
+  setGhosts(h){
+    this.ghosts.forEach((g,i)=>{if(!h){g.style.display="none";return;}g.style.display="";g.setAttribute("cx",X(h[i*2]));g.setAttribute("cy",Y(h[i*2+1]));});
+  }
   setSpeed(on){this.showSpeed=on;this.speedPath.style.display=on?"":"none";this.draw();}
   path(h){return `M${X(0)},${Y(0)} C${X(h[0])},${Y(h[1])} ${X(h[2])},${Y(h[3])} ${X(1)},${Y(1)}`;}
   draw(){
@@ -526,13 +568,75 @@ $("p-copy").addEventListener("click",async()=>{
   catch(e){const r=document.createRange();r.selectNodeContents($("p-code"));const s=getSelection();s.removeAllRanges();s.addRange(r);toast("Selected. Press Ctrl/Cmd+C to copy");}
 });
 
+/* ---------- train: copy the graph ---------- */
+const LINEAR=[0.25,0.25,0.75,0.75];
+const TRAIN=[
+  {name:"ease-out", title:"Add an ease-out", prop:"x", h:[0,0,0.58,1], brief:"Your box moves at one flat speed. Trace the curve to make it start fast and land softly.", lesson:"<b>Ease-out.</b> The curve is steep at the start (fast) and flat at the end (slow). Use it for things entering the screen."},
+  {name:"ease-in", title:"Add an ease-in", prop:"x", h:[0.42,0,1,1], brief:"Make the box start slowly and speed up as it leaves.", lesson:"<b>Ease-in.</b> Flat at the start (slow), steep at the end (fast). Use it for things leaving the screen."},
+  {name:"ease-in-out", title:"Ease both ends", prop:"scale", h:[0.42,0,0.58,1], brief:"Make the box grow gently, rush through the middle, then settle.", lesson:"<b>Ease-in-out.</b> Flat at both ends, steep in the middle. The safest choice for moving between two spots."},
+  {name:"expo out", title:"Snappy spin", prop:"rotate", h:[0.16,1,0.3,1], brief:"A very sharp start and a long, soft finish.", lesson:"<b>Expo out.</b> The first handle pulled high and left makes a burst of speed, then a long settle. It feels snappy and responsive."},
+  {name:"overshoot", title:"Make it overshoot", prop:"scale", h:[0.34,1.56,0.64,1], brief:"Pull a dot above the end line so the box grows too big, then settles.", lesson:"<b>Overshoot.</b> When the curve goes above the end line, the object goes past its target and comes back. Adds bounce and life."},
+  {name:"anticipation", title:"Add anticipation", prop:"x", h:[0.36,0,0.66,-0.56], brief:"Pull a dot below the start line so the box steps back before it goes.", lesson:"<b>Anticipation.</b> When the curve dips below the start line, the object moves backwards first, like winding up before a throw."}
+];
+const MATCH=90;
+function trainScore(h,t){
+  const a=makeEase(h),b=makeEase(t);let err=0;const N=60;
+  for(let i=0;i<=N;i++)err+=Math.abs(a(i/N)-b(i/N));
+  err/=N+1;
+  return Math.max(0,Math.min(100,Math.round(100-err*600)));
+}
+const trainSt={
+  level: Math.min(store.get("tlevel",0),TRAIN.length-1),
+  done: TRAIN.map((_,i)=>!!(store.get("tdone",[])[i])),
+  h: TRAIN.map(()=>LINEAR.slice())
+};
+const tStage=$("t-stage");let tLanes=[];
+const tEd=new Editor($("t-graph"),(h,end)=>{
+  trainSt.h[trainSt.level]=h.slice();
+  tLanes[0].ease=makeEase(h);
+  updateMatch(end);
+});
+function renderTLevels(){
+  $("t-levels").innerHTML=TRAIN.map((L,i)=>`<button class="lv${trainSt.done[i]?" done":""}" data-i="${i}" aria-current="${i===trainSt.level}" aria-label="Training ${i+1}: ${L.title}${trainSt.done[i]?", done":""}">${trainSt.done[i]?"✓":i+1}</button>`).join("");
+}
+$("t-levels").addEventListener("click",e=>{const b=e.target.closest(".lv");if(b)loadTrain(+b.dataset.i);});
+function loadTrain(i){
+  trainSt.level=i;store.set("tlevel",i);
+  const L=TRAIN[i];
+  $("t-eyebrow").textContent=`Training ${i+1} of ${TRAIN.length}`;
+  $("t-title").textContent=L.title;$("t-brief").textContent=L.brief;
+  tStage.innerHTML="";
+  tLanes=[lane(tStage,"you","Yours",L.prop),lane(tStage,"linear","No easing",L.prop)];
+  tLanes[0].ease=makeEase(trainSt.h[i]);tLanes[1].ease=t=>t;
+  tEd.set(trainSt.h[i]);tEd.setTarget(L.h,true);tEd.setGhosts(L.h);
+  $("t-lesson").hidden=true;$("t-next").hidden=true;
+  updateMatch(false,true);renderTLevels();cycleStart=performance.now();
+}
+function updateMatch(end,silent){
+  const i=trainSt.level,s=trainScore(trainSt.h[i],TRAIN[i].h);
+  $("t-pct").textContent=s+"%";
+  const bar=$("t-bar");bar.style.width=s+"%";bar.classList.toggle("ok",s>=MATCH);
+  const ok=s>=MATCH;
+  tLanes[0].obj.classList.toggle("happy",ok);
+  if(ok){
+    $("t-lesson").innerHTML=TRAIN[i].lesson;$("t-lesson").hidden=false;
+    $("t-next").hidden=i>=TRAIN.length-1;
+    if(!trainSt.done[i]&&end&&!silent){
+      trainSt.done[i]=true;store.set("tdone",trainSt.done);renderTLevels();
+      playResult(3);confetti();toast(i>=TRAIN.length-1?"Training complete! Try the Challenge next.":"Matched!");
+    }
+  }else{$("t-lesson").hidden=!trainSt.done[i];if(trainSt.done[i])$("t-lesson").innerHTML=TRAIN[i].lesson;}
+}
+$("t-reset").addEventListener("click",()=>{const i=trainSt.level;trainSt.h[i]=LINEAR.slice();tEd.set(LINEAR);tLanes[0].ease=makeEase(LINEAR);updateMatch(false,true);});
+$("t-next").addEventListener("click",()=>{if(trainSt.level<TRAIN.length-1)loadTrain(trainSt.level+1);});
+
 /* ---------- tabs ---------- */
 function setView(v){
   state.view=v;
-  $("view-challenge").hidden=v!=="challenge";$("view-play").hidden=v!=="play";
-  $("tab-challenge").setAttribute("aria-selected",String(v==="challenge"));$("tab-play").setAttribute("aria-selected",String(v==="play"));
+  ["train","challenge","play"].forEach(n=>{$("view-"+n).hidden=v!==n;$("tab-"+n).setAttribute("aria-selected",String(v===n));});
   cycleStart=performance.now();
 }
+$("tab-train").addEventListener("click",()=>setView("train"));
 $("tab-challenge").addEventListener("click",()=>setView("challenge"));
 $("tab-play").addEventListener("click",()=>setView("play"));
 
@@ -543,7 +647,8 @@ function frame(now){
   const pre=350,hold=700,cyc=pre+dur+hold;
   const el=(now-cycleStart)%cyc;
   const t=Math.min(1,Math.max(0,(el-pre)/dur));
-  if(state.view==="challenge"){cLanes.forEach(L=>applyProp(L,L.ease(t)));cEd.play(t);}
+  if(state.view==="train"){tLanes.forEach(L=>applyProp(L,L.ease(t)));tEd.play(t);}
+  else if(state.view==="challenge"){cLanes.forEach(L=>applyProp(L,L.ease(t)));cEd.play(t);}
   else{pLanes.forEach(L=>{applyProp(L,L.ease(t));if(L.lin)applyProp(L,t,L.lin);});pEd.play(t);}
   requestAnimationFrame(frame);
 }
@@ -595,6 +700,7 @@ $("nick").addEventListener("input",e=>{state.nick=e.target.value.slice(0,20);sto
 function start(){
   setSoundBtn();pEd.set(state.playH);refreshPlay();
   loadLevel(Math.min(state.level,LEVELS.length-1));
+  loadTrain(trainSt.level);
   setView(state.view);updateTotal();
   requestAnimationFrame(frame);
 }
