@@ -72,6 +72,7 @@ h2{font-family:var(--f-display);font-weight:500;font-size:19px;margin:0;text-wra
 .lane[data-who="you"] .obj{background:var(--you)}
 .lane[data-who="linear"] .obj{background:var(--muted)}
 .lane .obj.lin{background:transparent;border:2px dashed var(--muted);opacity:.8}
+#c-stage .lane[data-who="you"] .obj.lin{border-color:var(--ghost);opacity:1}
 /* little faces */
 .obj.main::before,.obj.main::after{content:"";position:absolute;top:14px;width:7px;height:9px;border-radius:4px;background:#14121c;animation:blink 3.6s infinite}
 .obj.main::before{left:12px}.obj.main::after{right:12px}
@@ -230,6 +231,11 @@ svg.graph{width:100%;height:auto;display:block;touch-action:none;user-select:non
             <h2 id="lv-title">Robot walk</h2>
             <p class="brief" id="lv-brief"></p>
             <div class="stage" id="c-stage"></div>
+            <p class="hint-line">The dashed outline in your lane is the target, so you can see exactly where you're ahead or behind.</p>
+            <div class="meter" aria-live="polite">
+              <div class="meter-head"><span>How close you are</span><b id="c-pct">0%</b></div>
+              <div class="meter-bar"><i id="c-bar"></i></div>
+            </div>
           </div>
           <div class="panel">
             <p class="eyebrow">Drag the two dots</p>
@@ -308,14 +314,14 @@ const fmt=n=>(Math.round(n*100)/100).toString();
 const css=h=>`cubic-bezier(${h.map(fmt).join(", ")})`;
 
 /* ---------- data ---------- */
-const START=[0.25,0.1,0.25,1];
+const START=[0.25,0.25,0.75,0.75];
 const LEVELS=[
-  {name:"Robot walk", prop:"x", h:[0,0,1,1], brief:"Same speed the whole way."},
-  {name:"Soft landing", prop:"x", h:[0,0,0.58,1], brief:"Fast start, slow stop."},
-  {name:"Slow start", prop:"scale", h:[0.42,0,1,1], brief:"It grows slowly, then fast."},
-  {name:"Smooth spin", prop:"rotate", h:[0.42,0,0.58,1], brief:"Spins slowly at both ends, fast in the middle."},
-  {name:"Pop!", prop:"scale", h:[0.34,1.56,0.64,1], brief:"It grows too big, then settles back."},
-  {name:"Wind-up", prop:"x", h:[0.36,0,0.66,-0.56], brief:"It steps back before it goes."}
+  {name:"Soft landing", prop:"x", h:[0,0,0.58,1], brief:"Watch the purple box, then make your pink box move the same way."},
+  {name:"Slow start", prop:"scale", h:[0.42,0,1,1], brief:"How does the purple box grow? Copy it."},
+  {name:"Smooth spin", prop:"rotate", h:[0.42,0,0.58,1], brief:"Copy the way the purple box spins."},
+  {name:"Snappy", prop:"x", h:[0.16,1,0.3,1], brief:"This one is quick. Watch the start closely."},
+  {name:"Pop!", prop:"scale", h:[0.34,1.56,0.64,1], brief:"Something extra happens at the end. Can you copy it?"},
+  {name:"Wind-up", prop:"x", h:[0.36,0,0.66,-0.56], brief:"Watch what the purple box does before it goes."}
 ];
 const PRESETS=[
   {name:"linear", h:[0,0,1,1], note:"Same speed the whole way."},
@@ -334,8 +340,8 @@ const hot=window.claude&&window.claude.hot;
 const boot=(hot&&hot.data)||{};
 const state={
   level: boot.level ?? store.get("level",0),
-  best: boot.best ?? store.get("best",LEVELS.map(()=>0)),
-  handles: boot.handles ?? store.get("handles",LEVELS.map(()=>START.slice())),
+  best: boot.best ?? store.get("best2",LEVELS.map(()=>0)),
+  handles: boot.handles ?? store.get("handles2",LEVELS.map(()=>START.slice())),
   checked: LEVELS.map(()=>false),
   hinted: LEVELS.map(()=>false),
   playH: boot.playH ?? [0,0,0.58,1],
@@ -346,7 +352,7 @@ const state={
 state.best=LEVELS.map((_,i)=>Number(state.best[i])||0);
 state.handles=LEVELS.map((_,i)=>Array.isArray(state.handles[i])&&state.handles[i].length===4?state.handles[i]:START.slice());
 if(hot&&hot.snapshot) hot.snapshot(()=>({level:state.level,best:state.best,handles:state.handles,playH:state.playH,dur:state.dur,view:state.view}));
-function save(){store.set("level",state.level);store.set("best",state.best);store.set("handles",state.handles);}
+function save(){store.set("level",state.level);store.set("best2",state.best);store.set("handles2",state.handles);}
 
 /* ---------- curve editor ---------- */
 const NS="http://www.w3.org/2000/svg";
@@ -450,7 +456,11 @@ const cEd=new Editor($("c-graph"),(h,done)=>{
   updateReadout();
   if(done)save();
 });
-function updateReadout(){}
+function updateReadout(){
+  const i=state.level,s=trainScore(state.handles[i],LEVELS[i].h);
+  $("c-pct").textContent=s+"%";
+  const bar=$("c-bar");bar.style.width=s+"%";bar.classList.toggle("ok",s>=90);
+}
 function scoreFor(h,t){
   const a=makeEase(h),b=makeEase(t);let err=0;const N=60;
   for(let i=0;i<=N;i++){err+=Math.abs(a(i/N)-b(i/N));}
@@ -473,7 +483,8 @@ function loadLevel(i){
   $("lv-title").textContent=L.name;
   $("lv-brief").textContent=L.brief;
   cStage.innerHTML="";
-  cLanes=[lane(cStage,"ghost","Target",L.prop),lane(cStage,"you","You",L.prop)];
+  cLanes=[lane(cStage,"ghost","Target",L.prop),lane(cStage,"you","You",L.prop,true)];
+  cLanes[1].linEase=makeEase(L.h);
   cLanes[0].ease=makeEase(L.h);cLanes[1].ease=makeEase(state.handles[i]);
   drawSpacing(cLanes[0],cLanes[0].ease);drawSpacing(cLanes[1],cLanes[1].ease);
   cEd.set(state.handles[i]);cEd.setTarget(L.h,false);
@@ -648,7 +659,7 @@ function frame(now){
   const el=(now-cycleStart)%cyc;
   const t=Math.min(1,Math.max(0,(el-pre)/dur));
   if(state.view==="train"){tLanes.forEach(L=>applyProp(L,L.ease(t)));tEd.play(t);}
-  else if(state.view==="challenge"){cLanes.forEach(L=>applyProp(L,L.ease(t)));cEd.play(t);}
+  else if(state.view==="challenge"){cLanes.forEach(L=>{applyProp(L,L.ease(t));if(L.lin&&L.linEase)applyProp(L,L.linEase(t),L.lin);});cEd.play(t);}
   else{pLanes.forEach(L=>{applyProp(L,L.ease(t));if(L.lin)applyProp(L,t,L.lin);});pEd.play(t);}
   requestAnimationFrame(frame);
 }
